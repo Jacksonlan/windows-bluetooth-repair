@@ -6,6 +6,8 @@ agent_created: true
 
 # Windows 蓝牙修复
 
+> 面向人类读者的完整说明（症状对照、原理、安全边界）见仓库 `README.md`。
+
 ## 用途
 
 在 Windows 上定位并修复"蓝牙起不来"这一类问题，并把它变成一次性解决的永久修复。
@@ -79,7 +81,9 @@ run-elevated.bat install-guard.ps1
 ```
 
 产出：`C:\ProgramData\BTGuard\bt-guard.ps1` + 计划任务 `BTGuardAutoRepair`
-（SYSTEM / 最高权限 / 开机延迟约 25 秒）。守卫在状态正常时**什么都不做**，
+（SYSTEM / 最高权限 / 两个触发器：**开机延迟约 25 秒**、**从睡眠唤醒后**）。
+若事件触发器创建失败，会自动降级为仅开机触发，不影响主功能。
+守卫在状态正常时**什么都不做**，
 只在检测到异常时才执行禁用/启用，日志 `C:\ProgramData\BTGuard\bt-guard.log`。
 
 ### 第 4 步：验证闭环（不可跳过）

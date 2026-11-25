@@ -147,31 +147,54 @@ try {
 
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
         -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $guardFile)
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    try { $trigger.Delay = ('PT{0}S' -f $DelaySeconds) } catch { L "  (delay unsupported, guard waits internally)" }
+    # trigger 1: at boot, after a short delay so the USB stack is ready
+    $boot = New-ScheduledTaskTrigger -AtStartup
+    try { $boot.Delay = ('PT{0}S' -f $DelaySeconds) } catch { L "  (delay unsupported, guard waits internally)" }
+    $triggers = @($boot)
+
+    # trigger 2: resume from sleep - covers "close the lid, open it, bluetooth is gone"
+    $hasResume = $false
+    try {
+        $xml = '<QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'
+        $cls = Get-CimClass -Namespace root/Microsoft/Windows/TaskScheduler -ClassName MSFT_TaskEventTrigger
+        $evt = New-CimInstance -CimClass $cls -ClientOnly -Property @{ Enabled = $true; Subscription = $xml }
+        $triggers += $evt
+        $hasResume = $true
+        L "  resume-from-sleep trigger: added"
+    } catch { L "  resume-from-sleep trigger: skipped ($($_.Exception.Message))" }
 
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-        -Principal $principal -Description 'Self-healing guard for a flaky Bluetooth radio' -Force | Out-Null
+    try {
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Settings $settings `
+            -Principal $principal -Description 'Self-healing guard for a flaky Bluetooth radio (boot + resume)' -Force | Out-Null
+    } catch {
+        # never let the optional resume trigger break a working boot guard
+        L "  registration with resume trigger failed -> retry boot-only: $($_.Exception.Message)"
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $boot -Settings $settings `
+            -Principal $principal -Description 'Self-healing guard for a flaky Bluetooth radio' -Force | Out-Null
+        $hasResume = $false
+    }
 
     $t = Get-ScheduledTask -TaskName $TaskName
     L "  state   : $($t.State)"
     L "  run as  : $($t.Principal.UserId) / $($t.Principal.RunLevel)"
     L "  delay   : $($t.Triggers[0].Delay)"
+    L "  triggers: $($t.Triggers.Count) (boot$(if ($hasResume) { ' + resume-from-sleep' } else { ', boot only' }))"
 
     # Marker lets a NON-admin diagnostic run see that the guard exists, because
     # a SYSTEM task is not reliably enumerable without elevation.
     $marker = Join-Path $Root 'installed.json'
     $info = [ordered]@{
-        TaskName      = $TaskName
-        DevicePattern = $DevicePattern
-        DelaySeconds  = $DelaySeconds
-        InstalledAt   = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-        Machine       = $env:COMPUTERNAME
-        GuardFile     = $guardFile
+        TaskName       = $TaskName
+        DevicePattern  = $DevicePattern
+        DelaySeconds   = $DelaySeconds
+        ResumeTrigger  = $hasResume
+        InstalledAt    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        Machine        = $env:COMPUTERNAME
+        GuardFile      = $guardFile
     }
     ($info | ConvertTo-Json) | Out-File -FilePath $marker -Encoding utf8 -Force
     L "Marker        : $marker"

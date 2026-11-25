@@ -139,7 +139,7 @@ $marker = 'C:\ProgramData\BTGuard\installed.json'
 $known = $false
 if (Test-Path $marker) {
     $m = Get-Content $marker -Raw | ConvertFrom-Json
-    Say ("  marker  : task='{0}'  pattern='{1}'  delay={2}s  installed={3}" -f $m.TaskName, $m.DevicePattern, $m.DelaySeconds, $m.InstalledAt)
+    Say ("  marker  : task='{0}'  pattern='{1}'  delay={2}s  resume={3}  installed={4}" -f $m.TaskName, $m.DevicePattern, $m.DelaySeconds, $m.ResumeTrigger, $m.InstalledAt)
     $known = $true
 }
 $t = Get-ScheduledTask -TaskName 'BTGuardAutoRepair'
